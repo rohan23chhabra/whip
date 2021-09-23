@@ -1,19 +1,19 @@
 class Record:
 
-    def __init__(self, domain, ip, requestType, namespace):
-        self.domain = domain
+    def __init__(self, zone, ip, requestType, namespace):
+        self.zone = zone
         self.ip = ip
         self.requestType = requestType
         self.namespace = namespace
 
     def __str__(self):
-        return "Domain: {}, RequestType: {}, IP: {}, Namespace: {}".format(self.domain,
-                                                                           self.requestType, self.ip, self.namespace)
+        return "Zone: {}, RequestType: {}, IP: {}, Namespace: {}".format(self.zone,
+                                                                         self.requestType, self.ip, self.namespace)
 
 
 def parse(recordStr):
     recordArr = recordStr.split(" ")
-    domain = clean(recordArr[0])
+    zone = clean(recordArr[0])
     namespace = clean(recordArr[2])
     requestType = clean(recordArr[3])
     ip = ""
@@ -21,7 +21,7 @@ def parse(recordStr):
         ip = clean(recordArr[5])
     else:
         ip = clean(recordArr[4])
-    return Record(domain, ip, requestType, namespace)
+    return Record(zone, ip, requestType, namespace)
 
 
 def clean(string):

@@ -2,7 +2,7 @@
 
 .PHONY: run
 run:
-	@python main.py netflix.com CNAME
+	@python main.py www.cs.stonybrook.edu A
 
 fmt:
 	@isort .
