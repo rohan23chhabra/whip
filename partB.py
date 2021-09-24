@@ -9,13 +9,11 @@ if __name__ == "__main__":
 
     whipSec = WhipSec(name, recordType)
 
+    print('Resolving DNSSEC verification status....')
     ans = Answer()
     status = whipSec.resolve(name, recordType, ans)
     if not status:
-        print('Could not resolve hostname - ', name)
-    else:
-        print(ans.rrSet)
         print(ans.statusMessage)
-
-def formatOutput(ans):
-    
+    else:
+        print('DNSSec Verification Successful')
+        print(ans.rrSet)

@@ -1,8 +1,15 @@
-.DEFAULT_GOAL := run
+.DEFAULT_GOAL := dns
 
-.PHONY: run
-run:
-	@python main.py www.cs.stonybrook.edu A
+.PHONY: dns
+dns:
+	@python partA.py stonybrook.edu A
+
+.PHONY: dnssec
+dnssec:
+	@python partB.py example.com A
 
 fmt:
 	@isort .
+
+install:
+	@pip3 install -r requirements.txt

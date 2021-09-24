@@ -7,6 +7,7 @@ import config.config as conf
 from records.answer import Answer
 
 
+# Whip class holds all the attributes and class variables required to resolve the name
 class Whip:
     types = {
         'NS': dns.rdatatype.NS,
@@ -15,6 +16,7 @@ class Whip:
     }
 
     def __init__(self, name, recordType):
+        # mappings - in memory map to hold IP addresses of name servers during resolution
         self.mappings = {}
         self.name = name
         self.recordType = recordType
@@ -41,7 +43,6 @@ class Whip:
         try:
             response = dns.query.udp(query, root, timeout=conf.requestTimeout)
         except:
-            print('Request to', root, 'timed out. Trying other servers')
             return False
 
         # Check if the response is SOA
@@ -51,58 +52,48 @@ class Whip:
 
         # Base case
         if len(response.answer) > 0:
-            print('ANSWER')
             status = False
             for answerEntry in response.answer:
                 if answerEntry.rdtype == self.types[recordType]:
-                    print('Populating ips for ', name)
                     ans.rrSet = answerEntry
                     status = True
                     break
 
+            # Check for CNAME
             if not status:
                 for answerEntry in response.answer:
                     if answerEntry.rdtype == dns.rdatatype.CNAME:
-                        print('CNAME encountered for name - ', name)
                         for cname, _ in answerEntry.items.items():
-                            print('Resolving ', cname.to_text())
+                            # Resolve the CNAME recursively to get the IP address
                             if self.resolve(cname.to_text(), self.recordType, ans):
                                 status = True
                                 break
 
             return status
 
-        print('Name - ', name)
-        print('Response.authority - ')
-        print(response.authority)
-        print('Response additional - ')
-        print(response.additional)
-
+        # Populate the in-memory map
         populateMappings(response, self.mappings)
 
         authorityRRSet = response.authority[0]
         status = False
         for server in authorityRRSet:
-            print('Asking server - ', server.target.to_text())
             if server.target.to_text() == name:
                 continue
 
             ipStatus = True
+            # Check if the next name server is already in the map
             if server.target.to_text() not in self.mappings:
-                print(server.target, 'not in mappings. Resolving...')
                 ipStatus = False
                 temp = Answer()
+                # If the name server's IP is unknown, resolve it recursively to get its IP
                 if self.resolve(server.target.to_text(), 'A', temp):
-                    print('Resolved - ', server.target.to_text())
-                    print('Temp - ')
-                    print(temp)
-                    print(type(temp))
                     ipStatus = True
                     if temp:
                         for entry, _ in temp.rrSet.items.items():
                             self.mappings[server.target.to_text()] = entry.to_text()
                             break
 
+            # Recursively ask the next name server to resolve the name
             if ipStatus and self.populateAnswers(self.mappings[server.target.to_text()], name, recordType, ans):
                 status = True
                 break

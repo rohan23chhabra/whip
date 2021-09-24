@@ -1,3 +1,4 @@
+# These are some status codes that represent errors that can occur during verification in DNSSEC
 RRSigNotFound = 1
 DNSKEYAbsent = 2
 DNSKEYInvalid = 3
