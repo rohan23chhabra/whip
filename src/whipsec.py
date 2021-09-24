@@ -1,3 +1,4 @@
+import dns.dnssec
 import dns.message
 import dns.query
 import dns.rdataclass
@@ -8,6 +9,8 @@ import src.secstatus as secstatus
 from records.answer import Answer
 
 
+# WhipSec class holds all the attributes and class variables required to resolve the name
+# and perform the DNSSEC verifications
 class WhipSec:
     types = {
         'NS': dns.rdatatype.NS,
@@ -24,6 +27,7 @@ class WhipSec:
         dns.dnssec.RSASHA256: 2,
     }
 
+    # Hard coded Root public KSK (from ICANN website)
     rootPubKSKHashes = ['E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8D',
                         '49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5']
 
@@ -31,8 +35,6 @@ class WhipSec:
         self.mappings = {}
         self.name = name
         self.recordType = recordType
-        self.zoneKSKHash = ['E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8D',
-                            '49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5']
 
     # This function resolves a name by trying all the root servers
     # It returns True if it is able to resolve the name into at least one IP address
@@ -41,6 +43,9 @@ class WhipSec:
         status = False
         for root in conf.rootServers:
             resp = self.populateAnswers(root, self.rootZone, name, recordType, ans, self.rootPubKSKHashes)
+            # If verifications fails at any step, then return immediately
+            if ans.dnssecStatus == 1:
+                return False
             if isinstance(resp, bool):
                 if resp:
                     status = True
@@ -56,7 +61,6 @@ class WhipSec:
     def populateAnswers(self, root, zone, name, recordType, ans, parentDS):
         if name is not self.name:
             if name in self.mappings:
-                print('IP for', name, 'found in local cache')
                 return True
 
         query_name = dns.name.from_text(name)
@@ -65,31 +69,26 @@ class WhipSec:
         try:
             response = dns.query.udp(query, root, timeout=conf.requestTimeout)
         except:
-            print('Request to', root, 'timed out. Trying other servers')
             return False
 
         # Check if the response is SOA
         if len(response.authority) > 0 and response.authority[0].rdtype == dns.rdatatype.SOA:
             ans.rrSet = response.authority[0]
-            print(ans.rrSet)
             return True
 
-        print('Normal response - ')
-        print(response)
-        print('Verifying ', name)
         status = self.verify(response, zone, root, ans, parentDS)
         if isinstance(status, bool):
+            # If verifications fails, return an error code
+            ans.dnssecStatus = 1
             return secstatus.DNSSECVerificationFailed
-        print('Verified ', name)
+        # Save the DS record to use in the next zone
         newParentDS = status
 
         # Base case
         if len(response.answer) > 0:
-            print('ANSWER for ', name)
             status = False
             for answerEntry in response.answer:
                 if answerEntry.rdtype == self.types[recordType]:
-                    print('Populating ips for ', name)
                     ans.rrSet = answerEntry
                     status = True
                     break
@@ -97,9 +96,7 @@ class WhipSec:
             if not status:
                 for answerEntry in response.answer:
                     if answerEntry.rdtype == dns.rdatatype.CNAME:
-                        print('CNAME encountered for name - ', name)
                         for cname, _ in answerEntry.items.items():
-                            print('Resolving ', cname.to_text())
                             if self.resolve(cname.to_text(), self.recordType, ans):
                                 status = True
                                 break
@@ -111,20 +108,14 @@ class WhipSec:
         authorityRRSet = response.authority[0]
         status = False
         for server in authorityRRSet:
-            print('Asking server - ', server.target.to_text())
             if server.target.to_text() == name:
                 continue
 
             ipStatus = True
             if server.target.to_text() not in self.mappings:
-                print(server.target, 'not in mappings. Resolving...')
                 ipStatus = False
                 temp = Answer()
                 if self.resolve(server.target.to_text(), 'A', temp):
-                    print('Resolved - ', server.target.to_text())
-                    print('Temp RRSet - ')
-                    print(temp.rrSet)
-                    print(type(temp))
                     ipStatus = True
                     if temp.rrSet:
                         for entry, _ in temp.rrSet.items.items():
@@ -133,29 +124,30 @@ class WhipSec:
 
             if ipStatus and self.populateAnswers(self.mappings[server.target.to_text()], authorityRRSet.name.to_text(),
                                                  name, recordType, ans, newParentDS):
-                status = True
-                break
+                if ans.dnssecStatus == 1:
+                    return secstatus.DNSSECVerificationFailed
+                else:
+                    status = True
+                    break
 
         return status
 
+    # Verifies the 3 stages
     def verify(self, resp, zone, root, ans, parentDS):
         status = self.verifyDNSKey(zone, root, ans)
         if isinstance(status, int):
             return False
-        print('DNSKEY verified')
 
         dnsKeyRRSet = status
         status = self.verifyZone(zone, dnsKeyRRSet, parentDS)
         if not status:
             ans.statusMessage = 'DNSSec verification failed'
             return False
-        print('Zone verified')
 
         status = self.verifyChainOfTrust(zone, resp, ans, dnsKeyRRSet, dns.rdatatype.DS)
         if isinstance(status, int):
             return False
 
-        print('Chain of Trust verified')
         return status
 
     def verifyDNSKey(self, zone, root, ans):
@@ -165,11 +157,8 @@ class WhipSec:
         try:
             response = dns.query.udp(query, root, timeout=conf.requestTimeout)
         except:
-            print('Request to', root, 'timed out. Trying other servers')
             return secstatus.RequestTimedOut
 
-        print('DNSKEY response: ')
-        print(response)
         if len(response.answer) == 0:
             ans.statusMessage = 'DNSSec not supported'
             return secstatus.DNSKEYAndRRSigAbsent
@@ -213,7 +202,6 @@ class WhipSec:
                 break
 
         if rrSig is None:
-            print('RRSig not found')
             ans.statusMessage = 'DNSSec not supported'
             return secstatus.RRSigNotFound
 
@@ -245,7 +233,6 @@ class WhipSec:
         if isVerified:
             return currentDS
 
-        print('DS Record could not be verified')
         ans.statusMessage = 'DNSSec verification failed'
         return secstatus.DSRecordInvalid
 
